@@ -910,8 +910,9 @@ update_client_send_to_menu(void)
 	 * GoToDesktop will be called as part of the action.
 	 */
 	struct buf buf = BUF_INIT;
-	wl_list_for_each(workspace, &server.workspaces.all, link) {
-		if (workspace == server.workspaces.current) {
+	struct workspace_group *group = workspaces_get_active_group();
+	wl_list_for_each(workspace, &group->workspaces, link) {
+		if (workspace == group->current) {
 			buf_add_fmt(&buf, ">%s<", workspace->name);
 		} else {
 			buf_add(&buf, workspace->name);
@@ -955,8 +956,9 @@ update_client_list_combined_menu(void)
 	struct view *view;
 	struct buf buffer = BUF_INIT;
 
-	wl_list_for_each(workspace, &server.workspaces.all, link) {
-		buf_add_fmt(&buffer, workspace == server.workspaces.current ? ">%s<" : "%s",
+	struct workspace_group *group = workspaces_get_active_group();
+	wl_list_for_each(workspace, &group->workspaces, link) {
+		buf_add_fmt(&buffer, workspace == group->current ? ">%s<" : "%s",
 				workspace->name);
 		separator_create(menu, buffer.data);
 		buf_clear(&buffer);

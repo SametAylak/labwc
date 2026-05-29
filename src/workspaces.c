@@ -64,6 +64,7 @@ static void
 _osd_update(void)
 {
 	struct theme *theme = rc.theme;
+	struct workspace_group *group = server.workspaces.active_group;
 
 	/* Settings */
 	uint16_t margin = 10;
@@ -74,7 +75,7 @@ _osd_update(void)
 		theme->osd_workspace_switcher_boxes_height == 0;
 
 	/* Dimensions */
-	size_t workspace_count = wl_list_length(&server.workspaces.all);
+	size_t workspace_count = wl_list_length(&group->workspaces);
 	uint16_t marker_width = workspace_count * (rect_width + padding) - padding;
 	uint16_t width = margin * 2 + (marker_width < 200 ? 200 : marker_width);
 	uint16_t height = margin * (hide_boxes ? 2 : 3) + rect_height + font_height(&rc.font_osd);
@@ -114,8 +115,8 @@ _osd_update(void)
 		uint16_t x;
 		if (!hide_boxes) {
 			x = (width - marker_width) / 2;
-			wl_list_for_each(workspace, &server.workspaces.all, link) {
-				bool active =  workspace == server.workspaces.current;
+			wl_list_for_each(workspace, &group->workspaces, link) {
+				bool active =  workspace == group->current;
 				set_cairo_color(cairo, rc.theme->osd_label_text_color);
 				struct wlr_fbox fbox = {
 					.x = x,
@@ -141,7 +142,7 @@ _osd_update(void)
 		pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
 
 		/* Center workspace indicator on the x axis */
-		int req_width = font_width(&rc.font_osd, server.workspaces.current->name);
+		int req_width = font_width(&rc.font_osd, group->current->name);
 		req_width = MIN(req_width, width - 2 * margin);
 		x = (width - req_width) / 2;
 		if (!hide_boxes) {
@@ -154,7 +155,7 @@ _osd_update(void)
 		pango_layout_set_font_description(layout, desc);
 		pango_layout_set_width(layout, req_width * PANGO_SCALE);
 		pango_font_description_free(desc);
-		pango_layout_set_text(layout, server.workspaces.current->name, -1);
+		pango_layout_set_text(layout, group->current->name, -1);
 		pango_cairo_show_layout(cairo, layout);
 
 		g_object_unref(layout);
@@ -183,7 +184,7 @@ _osd_update(void)
 }
 
 static struct workspace *
-workspace_find_by_name(const char *name)
+workspace_find_by_name(struct workspace_group *group, const char *name)
 {
 	struct workspace *workspace;
 
@@ -191,7 +192,7 @@ workspace_find_by_name(const char *name)
 	size_t parsed_index = parse_workspace_index(name);
 	if (parsed_index) {
 		size_t index = 0;
-		wl_list_for_each(workspace, &server.workspaces.all, link) {
+		wl_list_for_each(workspace, &group->workspaces, link) {
 			if (parsed_index == ++index) {
 				return workspace;
 			}
@@ -199,7 +200,7 @@ workspace_find_by_name(const char *name)
 	}
 
 	/* by name */
-	wl_list_for_each(workspace, &server.workspaces.all, link) {
+	wl_list_for_each(workspace, &group->workspaces, link) {
 		if (!strcmp(workspace->name, name)) {
 			return workspace;
 		}
@@ -225,10 +226,22 @@ handle_ext_workspace_commit(struct wl_listener *listener, void *data)
 }
 
 /* Internal API */
+static struct workspace_group *
+workspace_group_create(void)
+{
+	struct workspace_group *group = znew(*group);
+	wl_list_init(&group->workspaces);
+	group->ext_group = wlr_ext_workspace_group_handle_v1_create(
+		server.workspaces.ext_manager, /*caps*/ 0);
+	wl_list_append(&server.workspaces.groups, &group->link);
+	return group;
+}
+
 static void
-add_workspace(const char *name)
+add_workspace(struct workspace_group *group, const char *name)
 {
 	struct workspace *workspace = znew(*workspace);
+	workspace->group = group;
 	workspace->name = xstrdup(name);
 	workspace->tree = lab_wlr_scene_tree_create(server.workspace_tree);
 	workspace->view_trees[VIEW_LAYER_ALWAYS_ON_BOTTOM] =
@@ -237,7 +250,7 @@ add_workspace(const char *name)
 		lab_wlr_scene_tree_create(workspace->tree);
 	workspace->view_trees[VIEW_LAYER_ALWAYS_ON_TOP] =
 		lab_wlr_scene_tree_create(workspace->tree);
-	wl_list_append(&server.workspaces.all, &workspace->link);
+	wl_list_append(&group->workspaces, &workspace->link);
 	wlr_scene_node_set_enabled(&workspace->tree->node, false);
 
 	workspace->ext_workspace = wlr_ext_workspace_handle_v1_create(
@@ -245,7 +258,7 @@ add_workspace(const char *name)
 		EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_ACTIVATE);
 	workspace->ext_workspace->data = workspace;
 	wlr_ext_workspace_handle_v1_set_group(
-		workspace->ext_workspace, server.workspaces.ext_group);
+		workspace->ext_workspace, group->ext_group);
 	wlr_ext_workspace_handle_v1_set_name(workspace->ext_workspace, name);
 }
 
@@ -391,18 +404,19 @@ workspaces_init(void)
 	server.workspaces.ext_manager = wlr_ext_workspace_manager_v1_create(
 		server.wl_display, EXT_WORKSPACES_VERSION);
 
-	server.workspaces.ext_group = wlr_ext_workspace_group_handle_v1_create(
-		server.workspaces.ext_manager, /*caps*/ 0);
-
 	server.workspaces.on_ext_manager.commit.notify = handle_ext_workspace_commit;
 	wl_signal_add(&server.workspaces.ext_manager->events.commit,
 		&server.workspaces.on_ext_manager.commit);
 
-	wl_list_init(&server.workspaces.all);
+	wl_list_init(&server.workspaces.groups);
+
+	/* All outputs share a single workspace group. */
+	struct workspace_group *group = workspace_group_create();
+	server.workspaces.active_group = group;
 
 	struct workspace_config *conf;
 	wl_list_for_each(conf, &rc.workspace_config.workspaces, link) {
-		add_workspace(conf->name);
+		add_workspace(group, conf->name);
 	}
 
 	/*
@@ -412,16 +426,16 @@ workspaces_init(void)
 	char *initial_name = rc.workspace_config.initial_workspace_name;
 	struct workspace *initial = NULL;
 	struct workspace *first = wl_container_of(
-		server.workspaces.all.next, first, link);
+		group->workspaces.next, first, link);
 
 	if (initial_name) {
-		initial = workspace_find_by_name(initial_name);
+		initial = workspace_find_by_name(group, initial_name);
 	}
 	if (!initial) {
 		initial = first;
 	}
 
-	server.workspaces.current = initial;
+	group->current = initial;
 	wlr_scene_node_set_enabled(&initial->tree->node, true);
 	wlr_ext_workspace_handle_v1_set_active(initial->ext_workspace, true);
 }
@@ -435,16 +449,17 @@ void
 workspaces_switch_to(struct workspace *target, bool update_focus)
 {
 	assert(target);
-	if (target == server.workspaces.current) {
+	struct workspace_group *group = target->group;
+	if (target == group->current) {
 		return;
 	}
 
 	/* Disable the old workspace */
 	wlr_scene_node_set_enabled(
-		&server.workspaces.current->tree->node, false);
+		&group->current->tree->node, false);
 
 	wlr_ext_workspace_handle_v1_set_active(
-		server.workspaces.current->ext_workspace, false);
+		group->current->ext_workspace, false);
 
 	/*
 	 * Move Omnipresent views to new workspace.
@@ -462,10 +477,10 @@ workspaces_switch_to(struct workspace *target, bool update_focus)
 	wlr_scene_node_set_enabled(&target->tree->node, true);
 
 	/* Save the last visited workspace */
-	server.workspaces.last = server.workspaces.current;
+	group->last = group->current;
 
 	/* Make sure new views will spawn on the new workspace */
-	server.workspaces.current = target;
+	group->current = target;
 
 	struct view *grabbed_view = server.grabbed_view;
 	if (grabbed_view) {
@@ -525,12 +540,13 @@ workspaces_find(struct workspace *anchor, const char *name, bool wrap)
 	if (!name) {
 		return NULL;
 	}
-	struct wl_list *workspaces = &server.workspaces.all;
+	struct workspace_group *group = anchor->group;
+	struct wl_list *workspaces = &group->workspaces;
 
 	if (!strcasecmp(name, "current")) {
 		return anchor;
 	} else if (!strcasecmp(name, "last")) {
-		return server.workspaces.last;
+		return group->last;
 	} else if (!strcasecmp(name, "left")) {
 		return get_prev(anchor, workspaces, wrap);
 	} else if (!strcasecmp(name, "right")) {
@@ -540,7 +556,7 @@ workspaces_find(struct workspace *anchor, const char *name, bool wrap)
 	} else if (!strcasecmp(name, "right-occupied")) {
 		return get_next_occupied(anchor, workspaces, wrap);
 	}
-	return workspace_find_by_name(name);
+	return workspace_find_by_name(group, name);
 }
 
 static void
@@ -564,18 +580,19 @@ workspaces_reconfigure(void)
 	 *   - Destroy workspaces if fewer workspace are desired
 	 */
 
-	struct wl_list *workspace_link = server.workspaces.all.next;
+	struct workspace_group *group = server.workspaces.active_group;
+	struct wl_list *workspace_link = group->workspaces.next;
 
 	struct workspace_config *conf;
 	wl_list_for_each(conf, &rc.workspace_config.workspaces, link) {
 		struct workspace *workspace = wl_container_of(
 			workspace_link, workspace, link);
 
-		if (workspace_link == &server.workspaces.all) {
+		if (workspace_link == &group->workspaces) {
 			/* # of configured workspaces increased */
 			wlr_log(WLR_DEBUG, "Adding workspace \"%s\"",
 				conf->name);
-			add_workspace(conf->name);
+			add_workspace(group, conf->name);
 			continue;
 		}
 		if (strcmp(workspace->name, conf->name)) {
@@ -589,16 +606,16 @@ workspaces_reconfigure(void)
 		workspace_link = workspace_link->next;
 	}
 
-	if (workspace_link == &server.workspaces.all) {
+	if (workspace_link == &group->workspaces) {
 		return;
 	}
 
 	/* # of configured workspaces decreased */
 	overlay_finish(&server.seat);
 	struct workspace *first_workspace =
-		wl_container_of(server.workspaces.all.next, first_workspace, link);
+		wl_container_of(group->workspaces.next, first_workspace, link);
 
-	while (workspace_link != &server.workspaces.all) {
+	while (workspace_link != &group->workspaces) {
 		struct workspace *workspace = wl_container_of(
 			workspace_link, workspace, link);
 
@@ -612,12 +629,12 @@ workspaces_reconfigure(void)
 			}
 		}
 
-		if (server.workspaces.current == workspace) {
+		if (group->current == workspace) {
 			workspaces_switch_to(first_workspace,
 				/* update_focus */ true);
 		}
-		if (server.workspaces.last == workspace) {
-			server.workspaces.last = first_workspace;
+		if (group->last == workspace) {
+			group->last = first_workspace;
 		}
 
 		workspace_link = workspace_link->next;
@@ -628,10 +645,39 @@ workspaces_reconfigure(void)
 void
 workspaces_destroy(void)
 {
-	struct workspace *workspace, *tmp;
-	wl_list_for_each_safe(workspace, tmp, &server.workspaces.all, link) {
-		destroy_workspace(workspace);
+	struct workspace_group *group, *group_tmp;
+	wl_list_for_each_safe(group, group_tmp, &server.workspaces.groups, link) {
+		struct workspace *workspace, *tmp;
+		wl_list_for_each_safe(workspace, tmp, &group->workspaces, link) {
+			destroy_workspace(workspace);
+		}
+		assert(wl_list_empty(&group->workspaces));
+		wl_list_remove(&group->link);
+		/*
+		 * The ext_group handle is owned by the workspace manager and
+		 * torn down together with it when the display is destroyed.
+		 */
+		free(group);
 	}
-	assert(wl_list_empty(&server.workspaces.all));
+	assert(wl_list_empty(&server.workspaces.groups));
 	wl_list_remove(&server.workspaces.on_ext_manager.commit.link);
+}
+
+/* Accessors resolving via the active group */
+struct workspace_group *
+workspaces_get_active_group(void)
+{
+	return server.workspaces.active_group;
+}
+
+struct workspace *
+workspaces_get_current(void)
+{
+	return workspaces_get_active_group()->current;
+}
+
+struct workspace *
+workspaces_get_last(void)
+{
+	return workspaces_get_active_group()->last;
 }

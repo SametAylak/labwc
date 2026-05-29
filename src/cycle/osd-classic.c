@@ -85,7 +85,7 @@ cycle_osd_classic_init(struct cycle_osd_output *osd_output)
 		&theme->osd_window_switcher_classic;
 	int padding = theme->osd_border_width + switcher_theme->padding;
 	bool show_workspace = wl_list_length(&rc.workspace_config.workspaces) > 1;
-	const char *workspace_name = server.workspaces.current->name;
+	const char *workspace_name = workspaces_get_current()->name;
 	int nr_views = wl_list_length(&server.cycle.views);
 
 	struct wlr_box output_box;

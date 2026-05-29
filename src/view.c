@@ -204,7 +204,7 @@ view_matches_query(struct view *view, struct view_query *query)
 
 	if (query->desktop) {
 		const char *view_workspace = view->workspace->name;
-		struct workspace *current = server.workspaces.current;
+		struct workspace *current = workspaces_get_current();
 
 		if (!strcasecmp(query->desktop, "other")) {
 			/* "other" means the view is NOT on the current desktop */
@@ -270,7 +270,7 @@ view_matches_criteria(struct view *view, enum lab_view_criteria criteria)
 		return false;
 	}
 	if (criteria & LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
-		if (view->workspace != server.workspaces.current) {
+		if (view->workspace != workspaces_get_current()) {
 			return false;
 		}
 	}

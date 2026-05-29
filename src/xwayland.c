@@ -1003,7 +1003,7 @@ xwayland_view_create(struct wlr_xwayland_surface *xsurface, bool mapped)
 	xwayland_view->xwayland_surface = xsurface;
 	xsurface->data = view;
 
-	view->workspace = server.workspaces.current;
+	view->workspace = workspaces_get_current();
 	view->scene_tree = lab_wlr_scene_tree_create(
 		view->workspace->view_trees[VIEW_LAYER_NORMAL]);
 	wlr_scene_node_set_enabled(&view->scene_tree->node, false);

@@ -91,10 +91,13 @@ get_view_part(struct view *view, struct wlr_scene_node *node)
 static struct workspace *
 get_workspace_from_node(struct wlr_scene_node *node)
 {
+	struct workspace_group *group;
 	struct workspace *workspace;
-	wl_list_for_each(workspace, &server.workspaces.all, link) {
-		if (&workspace->tree->node == node) {
-			return workspace;
+	wl_list_for_each(group, &server.workspaces.groups, link) {
+		wl_list_for_each(workspace, &group->workspaces, link) {
+			if (&workspace->tree->node == node) {
+				return workspace;
+			}
 		}
 	}
 	return NULL;

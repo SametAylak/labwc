@@ -1355,13 +1355,13 @@ run_action(struct view *view, struct action *action,
 		 * removed the action during the initial parsing step as it is
 		 * a required argument for both SendToDesktop and GoToDesktop.
 		 */
-		struct workspace *target_workspace = workspaces_find(
-			server.workspaces.current, to, wrap);
+		struct workspace *current = workspaces_get_current();
+		struct workspace *target_workspace =
+			workspaces_find(current, to, wrap);
 		if (action->type == ACTION_TYPE_GO_TO_DESKTOP) {
 			bool toggle = action_get_bool(action, "toggle", false);
-			if (target_workspace == server.workspaces.current
-				&& toggle) {
-				target_workspace = server.workspaces.last;
+			if (target_workspace == current && toggle) {
+				target_workspace = workspaces_get_last();
 			}
 		}
 		if (!target_workspace) {

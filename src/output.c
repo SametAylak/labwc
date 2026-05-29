@@ -37,6 +37,7 @@
 #include "regions.h"
 #include "session-lock.h"
 #include "view.h"
+#include "workspaces.h"
 #include "xwayland.h"
 
 #if WLR_HAS_X11_BACKEND
@@ -402,8 +403,9 @@ add_output_to_layout(struct output *output)
 			layout_output, output->scene_output);
 	}
 
+	/* All outputs belong to the single shared workspace group. */
 	wlr_ext_workspace_group_handle_v1_output_enter(
-		server.workspaces.ext_group, output->wlr_output);
+		workspaces_get_active_group()->ext_group, output->wlr_output);
 
 	/* (Re-)create regions from config */
 	regions_reconfigure_output(output);
@@ -866,7 +868,8 @@ output_config_apply(struct wlr_output_configuration_v1 *config)
 			regions_evacuate_output(output);
 
 			wlr_ext_workspace_group_handle_v1_output_leave(
-				server.workspaces.ext_group, output->wlr_output);
+				workspaces_get_active_group()->ext_group,
+				output->wlr_output);
 
 			/*
 			 * At time of writing, wlr_output_layout_remove()
